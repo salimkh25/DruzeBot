@@ -62,7 +62,7 @@ def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"members": {}, "pending": {}, "counter": 0, "cooldowns": {}}
+    return {"members": {}, "pending": {}, "rejected": [], "counter": 0, "cooldowns": {}}
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -135,8 +135,10 @@ async def menu_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "📋 שאלון הצטרפות\n\n"
             "אנא ענה על השאלות הבאות.\n"
-            "🔒 כל הנתונים מוגנים ומעובדים על ידי בוט בלבד.\n\n"
-            "1️⃣ מה שם המשפחה שלך?"
+            "🔒 המידע לא נשמר ומשמש אך ורק לבדיקה אוטומטית AI.\n\n"
+            "1️⃣ מה שם המשפחה שלך?\n"
+            "ℹ️ הפרט נלקח לצורך אימות בלבד ממאגר משפחות שהוזן מראש.\n"
+            "אם המשפחה שלך לא במאגר – פנה למנהל דרך התפריט."
         )
         ctx.user_data["answers"] = {}
         return Q_LASTNAME
@@ -225,6 +227,7 @@ async def q_village(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["answers"]["village"] = update.message.text
     await update.message.reply_text(
         "3️⃣ אנא העלה צילום של תג חוגר / תעודת לוחם / תעודת שחרור.\n\n"
+        "🤖 התמונה נבדקת על ידי מודל עיבוד תמונה AI שמטרתו לזהות את שם המשפחה ולאמת מול הנתון שהזנת.\n\n"
         "✅ מותר להסתיר: מספר אישי, שם פרטי, תמונה\n"
         "✅ צריך להיות גלוי: שם משפחה, סוג התעודה"
     )
@@ -489,6 +492,15 @@ async def admin_decision(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"✅ {pending['answers']['lastname']} אושר – מספר #{str(member_number).zfill(3)}")
 
     elif action == "reject":
+        # שמירת נתוני הנדחה בארכיון
+        if "rejected" not in data:
+            data["rejected"] = []
+        data["rejected"].append({
+            "user_id": uid,
+            "username": pending.get("username", ""),
+            "answers": pending["answers"],
+            "rejected_at": datetime.now().isoformat()
+        })
         del data["pending"][str(uid)]
         # הגדרת cooldown 24 שעות
         data["cooldowns"][str(uid)] = (datetime.now() + timedelta(hours=24)).isoformat()
@@ -496,8 +508,10 @@ async def admin_decision(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         await ctx.bot.send_message(
             uid,
-            "❌ בקשתך לא אושרה הפעם.\n"
-            "תוכל להגיש בקשה מחדש בעוד 24 שעות."
+            "❌ בקשתך נדחתה עקב אי עמידה בתנאים.\n\n"
+            "נדרש לוודא שכלל הנתונים שהזנת נכונים ותואמים.\n"
+            "ניתן לפנות למנהל דרך התפריט במידה וישנו חשד לטעות בזיהוי האוטומטי.\n\n"
+            "ניתן להגיש בקשה חוזרת בעוד 24 שעות."
         )
         await query.edit_message_text(f"❌ {pending['answers']['lastname']} נדחה")
 
