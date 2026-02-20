@@ -484,10 +484,23 @@ async def admin_decision(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         data["cooldowns"].pop(str(uid), None)
         save_data(data)
 
+        # יצירת לינק הזמנה חד-פעמי לקבוצה
+        try:
+            invite = await ctx.bot.create_chat_invite_link(
+                GROUP_ID,
+                member_limit=1,
+                name=f"#{str(member_number).zfill(3)} {pending['answers']['lastname']}"
+            )
+            invite_text = f"\n🔗 לחץ כאן להצטרפות לקבוצה:\n{invite.invite_link}"
+        except Exception as e:
+            logger.error(f"Could not create invite link: {e}")
+            invite_text = "\n\n⚠️ לא ניתן היה ליצור לינק הזמנה. פנה למנהל לקבלת לינק."
+
         await ctx.bot.send_message(
             uid,
             f"🎉 בקשתך אושרה!\n\n" +
-            WELCOME_MSG.format(number=str(member_number).zfill(3))
+            WELCOME_MSG.format(number=str(member_number).zfill(3)) +
+            invite_text
         )
         await query.edit_message_text(f"✅ {pending['answers']['lastname']} אושר – מספר #{str(member_number).zfill(3)}")
 
