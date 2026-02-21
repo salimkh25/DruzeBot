@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import json
 import os
 from datetime import datetime, timedelta
@@ -32,7 +33,12 @@ REPORT_MEMBER_NUM, REPORT_REASON = 10, 11
 CONTACT_MSG = 20
 
 # ניהול (מנהל)
-ADMIN_WARN_NUM, ADMIN_BLOCK_NUM, ADMIN_BROADCAST_MSG = 30, 31, 32
+ADMIN_WARN_NUM, ADMIN_BLOCK_NUM, ADMIN_BROADCAST_MSG, ADMIN_NOTIFY_MSG = 30, 31, 32, 33
+ADMIN_DM_TARGET, ADMIN_DM_MSG = 34, 35
+
+# הודעה אנונימית + וידוי
+ANON_MSG = 40
+CONFESSION_MSG = 41
 
 WELCOME_MSG = """
 ברוך הבא לקבוצת החיילים הדרוזים 🫡
@@ -46,6 +52,20 @@ WELCOME_MSG = """
 • במקרה של עבירה: אזהרה ראשונה, בשנייה – הוצאה
 
 המספר שלך בקבוצה: #{number}
+תהנה מהקבוצה! 💚
+"""
+
+GROUP_WELCOME_MSG = """
+ברוך הבא לקבוצת החיילים הדרוזים 🫡
+
+הנחיות התנהלות:
+• כבוד הדדי בכל עת
+• שפה מכבדת בלבד – ללא גסויות, ללא עלבונות
+• איסור פרסום פרטים מזהים של חברים אחרים
+• איסור צילומסך ושיתוף תוכן מחוץ לקבוצה
+• נושאים פוליטיים – בנימוס ובאחריות
+• במקרה של עבירה: אזהרה ראשונה, בשנייה – הוצאה
+
 תהנה מהקבוצה! 💚
 """
 
@@ -89,6 +109,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     buttons = [
         [InlineKeyboardButton("📋 שאלון הצטרפות", callback_data="menu_questionnaire")],
+        [InlineKeyboardButton("🎭 הודעה אנונימית", callback_data="menu_anon")],
+        [InlineKeyboardButton("🤫 וידוי אנונימי", callback_data="menu_confession")],
         [InlineKeyboardButton("🚨 דיווח על חשבון", callback_data="menu_report")],
         [InlineKeyboardButton("💬 פנייה כללית למנהל", callback_data="menu_contact")],
     ]
@@ -97,6 +119,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         buttons.append([InlineKeyboardButton("⚠️ התראה לחבר", callback_data="menu_warn")])
         buttons.append([InlineKeyboardButton("🚫 חסימת חבר", callback_data="menu_block")])
         buttons.append([InlineKeyboardButton("📢 הפצת הודעה לקבוצה", callback_data="menu_broadcast")])
+        buttons.append([InlineKeyboardButton("📨 שליחת הודעה לכל המשתמשים", callback_data="menu_notify")])
+        buttons.append([InlineKeyboardButton("✉️ הודעה פרטית לחבר", callback_data="menu_dm")])
         buttons.append([InlineKeyboardButton("📋 רשימת חברים", callback_data="menu_members")])
 
     await update.message.reply_text(
@@ -192,7 +216,7 @@ async def menu_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
         await query.edit_message_text(
             "📢 הפצת הודעה לקבוצה\n\n"
-            "כתוב את ההודעה שברצונך לשלוח לקבוצה."
+            "שלח טקסט, תמונה או סרטון – יישלח לקבוצה כפי שהוא."
         )
         return ADMIN_BROADCAST_MSG
 
@@ -211,6 +235,48 @@ async def menu_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             lines.append(f"#{str(m['number']).zfill(3)} | {m['lastname']} | {m['village']} | {m['rank']}{warn_str}")
         await query.edit_message_text("\n".join(lines))
         return ConversationHandler.END
+
+    # ── הודעה אנונימית ──
+    elif choice == "menu_anon":
+        await query.edit_message_text(
+            "🎭 הודעה אנונימית\n\n"
+            "שלח הודעה, תמונה או סרטון – והבוט יפרסם אותם בקבוצה בצורה אנונימית.\n"
+            "🔒 הזהות שלך לא נשמרת ולא נחשפת לאף אחד."
+        )
+        return ANON_MSG
+
+    # ── וידוי אנונימי ──
+    elif choice == "menu_confession":
+        await query.edit_message_text(
+            "🤫 וידוי אנונימי\n\n"
+            "יש לך משהו על הלב? משהו שתמיד רצית להגיד?\n"
+            "כתוב את הוידוי שלך – הבוט יפרסם אותו בקבוצה בצורה אנונימית.\n"
+            "🔒 אף אחד לא יידע שזה אתה. הכל נשאר בין הבוט לבינך. 🤐"
+        )
+        return CONFESSION_MSG
+
+    # ── ניהול: שליחת הודעה לכל המשתמשים ──
+    elif choice == "menu_notify":
+        if query.from_user.id != ADMIN_ID:
+            await query.edit_message_text("❌ אין לך הרשאה לפעולה זו.")
+            return ConversationHandler.END
+        await query.edit_message_text(
+            "📨 שליחת הודעה לכל המשתמשים\n\n"
+            "שלח טקסט, תמונה או סרטון – יישלח לכל מי שמשתמש בבוט."
+        )
+        return ADMIN_NOTIFY_MSG
+
+    # ── ניהול: הודעה פרטית לחבר ──
+    elif choice == "menu_dm":
+        if query.from_user.id != ADMIN_ID:
+            await query.edit_message_text("❌ אין לך הרשאה לפעולה זו.")
+            return ConversationHandler.END
+        await query.edit_message_text(
+            "✉️ הודעה פרטית לחבר\n\n"
+            "שלח את מספר החבר שברצונך לשלוח לו הודעה.\n"
+            "לדוגמה: 001"
+        )
+        return ADMIN_DM_TARGET
 
     return ConversationHandler.END
 
@@ -424,25 +490,192 @@ async def admin_block_num(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ══════════════════════════════════════════════════════════
-#               ניהול – הפצת הודעה
+#               ניהול – הפצת הודעה לקבוצה
 # ══════════════════════════════════════════════════════════
 
 async def admin_broadcast_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """מנהל: שליחת הודעה לקבוצה דרך הבוט"""
+    """מנהל: שליחת הודעה/תמונה/סרטון לקבוצה דרך הבוט"""
     if update.effective_user.id != ADMIN_ID:
         return ConversationHandler.END
 
-    message_text = update.message.text
-
     try:
-        await ctx.bot.send_message(
-            GROUP_ID,
-            f"📢 הודעה מהמנהל:\n\n{message_text}"
-        )
+        if update.message.photo:
+            await ctx.bot.send_photo(
+                GROUP_ID,
+                update.message.photo[-1].file_id,
+                caption=update.message.caption or ""
+            )
+        elif update.message.video:
+            await ctx.bot.send_video(
+                GROUP_ID,
+                update.message.video.file_id,
+                caption=update.message.caption or ""
+            )
+        elif update.message.text:
+            await ctx.bot.send_message(GROUP_ID, update.message.text)
+        else:
+            await update.message.reply_text("⚠️ נתמך רק טקסט, תמונה או סרטון.")
+            return ADMIN_BROADCAST_MSG
+
         await update.message.reply_text("✅ ההודעה נשלחה לקבוצה בהצלחה.")
     except Exception as e:
         logger.error(f"Could not send broadcast: {e}")
         await update.message.reply_text("❌ שגיאה בשליחת ההודעה לקבוצה.")
+
+    return ConversationHandler.END
+
+# ══════════════════════════════════════════════════════════
+#                  הודעה אנונימית
+# ══════════════════════════════════════════════════════════
+
+async def anon_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """קבלת הודעה אנונימית (טקסט / תמונה / סרטון) ושליחה לקבוצה"""
+    try:
+        if update.message.photo:
+            caption = f"🎭 הודעה אנונימית:"
+            if update.message.caption:
+                caption += f"\n\n{update.message.caption}"
+            await ctx.bot.send_photo(
+                GROUP_ID,
+                update.message.photo[-1].file_id,
+                caption=caption
+            )
+        elif update.message.video:
+            caption = f"🎭 הודעה אנונימית:"
+            if update.message.caption:
+                caption += f"\n\n{update.message.caption}"
+            await ctx.bot.send_video(
+                GROUP_ID,
+                update.message.video.file_id,
+                caption=caption
+            )
+        elif update.message.text:
+            await ctx.bot.send_message(
+                GROUP_ID,
+                f"🎭 הודעה אנונימית:\n\n{update.message.text}"
+            )
+        else:
+            await update.message.reply_text("⚠️ נתמך רק טקסט, תמונה או סרטון.")
+            return ANON_MSG
+
+        await update.message.reply_text("✅ ההודעה נשלחה לקבוצה באנונימיות. 🎭")
+    except Exception as e:
+        logger.error(f"Could not send anonymous message: {e}")
+        await update.message.reply_text("❌ שגיאה בשליחת ההודעה.")
+
+    return ConversationHandler.END
+
+# ══════════════════════════════════════════════════════════
+#                  וידוי אנונימי
+# ══════════════════════════════════════════════════════════
+
+async def confession_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """קבלת וידוי אנונימי ושליחה לקבוצה"""
+    try:
+        await ctx.bot.send_message(
+            GROUP_ID,
+            f"🤫 וידוי אנונימי:\n\n{update.message.text}"
+        )
+        await update.message.reply_text("✅ הוידוי נשלח לקבוצה באנונימיות. 🤫")
+    except Exception as e:
+        logger.error(f"Could not send confession: {e}")
+        await update.message.reply_text("❌ שגיאה בשליחת הוידוי.")
+
+    return ConversationHandler.END
+
+# ══════════════════════════════════════════════════════════
+#          ניהול – שליחת הודעה לכל המשתמשים
+# ══════════════════════════════════════════════════════════
+
+async def _send_to_user(ctx, uid, update):
+    """שליחת הודעת המנהל (טקסט/תמונה/סרטון) למשתמש בודד"""
+    if update.message.photo:
+        await ctx.bot.send_photo(
+            uid,
+            update.message.photo[-1].file_id,
+            caption=update.message.caption or ""
+        )
+    elif update.message.video:
+        await ctx.bot.send_video(
+            uid,
+            update.message.video.file_id,
+            caption=update.message.caption or ""
+        )
+    elif update.message.text:
+        await ctx.bot.send_message(uid, update.message.text)
+
+async def admin_notify_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """מנהל: שליחת הודעה/תמונה/סרטון לכל משתמשי הבוט"""
+    if update.effective_user.id != ADMIN_ID:
+        return ConversationHandler.END
+
+    data = load_data()
+
+    # איסוף כל ה-user IDs (חברים + ממתינים)
+    all_uids = set()
+    for uid in data.get("members", {}):
+        all_uids.add(int(uid))
+    for uid in data.get("pending", {}):
+        all_uids.add(int(uid))
+
+    sent = 0
+    failed = 0
+    for uid in all_uids:
+        try:
+            await _send_to_user(ctx, uid, update)
+            sent += 1
+        except Exception as e:
+            logger.error(f"Could not notify {uid}: {e}")
+            failed += 1
+
+    await update.message.reply_text(
+        f"✅ ההודעה נשלחה ל-{sent} משתמשים."
+        + (f"\n⚠️ נכשל ל-{failed} משתמשים." if failed else "")
+    )
+    return ConversationHandler.END
+
+# ══════════════════════════════════════════════════════════
+#          ניהול – הודעה פרטית לחבר
+# ══════════════════════════════════════════════════════════
+
+async def admin_dm_target(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """מנהל: קבלת מספר חבר לשליחת הודעה פרטית"""
+    if update.effective_user.id != ADMIN_ID:
+        return ConversationHandler.END
+
+    data = load_data()
+    target_uid, target_member = find_member_by_number(data, update.message.text.strip())
+
+    if not target_member:
+        await update.message.reply_text("❌ חבר לא נמצא. נסה שוב עם /start")
+        return ConversationHandler.END
+
+    ctx.user_data["dm_target_uid"] = target_uid
+    ctx.user_data["dm_target_name"] = target_member["lastname"]
+    await update.message.reply_text(
+        f"✉️ שולח הודעה ל-#{str(target_member['number']).zfill(3)} ({target_member['lastname']})\n\n"
+        "שלח טקסט, תמונה או סרטון – יישלח אליו בפרטי."
+    )
+    return ADMIN_DM_MSG
+
+async def admin_dm_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """מנהל: שליחת ההודעה הפרטית לחבר"""
+    if update.effective_user.id != ADMIN_ID:
+        return ConversationHandler.END
+
+    target_uid = ctx.user_data.get("dm_target_uid")
+    target_name = ctx.user_data.get("dm_target_name", "")
+
+    if not target_uid:
+        await update.message.reply_text("❌ שגיאה. נסה שוב עם /start")
+        return ConversationHandler.END
+
+    try:
+        await _send_to_user(ctx, target_uid, update)
+        await update.message.reply_text(f"✅ ההודעה נשלחה ל-{target_name} בפרטי.")
+    except Exception as e:
+        logger.error(f"Could not DM {target_uid}: {e}")
+        await update.message.reply_text("❌ שגיאה בשליחת ההודעה.")
 
     return ConversationHandler.END
 
@@ -532,17 +765,23 @@ async def admin_decision(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 #               אירועי קבוצה
 # ══════════════════════════════════════════════════════════
 
+async def _delete_after(msg, seconds):
+    """מחיקת הודעה אחרי מספר שניות"""
+    await asyncio.sleep(seconds)
+    try:
+        await msg.delete()
+    except Exception as e:
+        logger.error(f"Could not delete welcome message: {e}")
+
 async def new_member_joined(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """הודעה אוטומטית כשחבר נוסף לקבוצה"""
     for member in update.message.new_chat_members:
         data = load_data()
         uid = str(member.id)
         if uid in data["members"]:
-            number = data["members"][uid]["number"]
-            await update.message.reply_text(
-                f"ברוך הבא #{str(number).zfill(3)}! 🫡\n"
-                f"קיבלת הודעה פרטית עם הנחיות הקבוצה."
-            )
+            sent_msg = await update.message.reply_text(GROUP_WELCOME_MSG)
+            # מחיקה אוטומטית אחרי 24 שעות
+            asyncio.create_task(_delete_after(sent_msg, 86400))
 
 # ══════════════════════════════════════════════════════════
 #                      ביטול
@@ -581,9 +820,16 @@ def main():
             CONTACT_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, contact_msg)],
 
             # ניהול
-            ADMIN_WARN_NUM:     [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_warn_num)],
-            ADMIN_BLOCK_NUM:    [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_block_num)],
-            ADMIN_BROADCAST_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_msg)],
+            ADMIN_WARN_NUM:      [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_warn_num)],
+            ADMIN_BLOCK_NUM:     [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_block_num)],
+            ADMIN_BROADCAST_MSG: [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, admin_broadcast_msg)],
+            ADMIN_NOTIFY_MSG:    [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, admin_notify_msg)],
+            ADMIN_DM_TARGET:     [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_dm_target)],
+            ADMIN_DM_MSG:        [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, admin_dm_msg)],
+
+            # הודעה אנונימית + וידוי
+            ANON_MSG:       [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, anon_msg)],
+            CONFESSION_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, confession_msg)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
